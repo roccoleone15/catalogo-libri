@@ -39,37 +39,44 @@ function Scanner({ boxName, onDone }) {
   const [count, setCount] = useState(0);
   const [last, setLast] = useState("");
   const [reader] = useState(() => new BrowserMultiFormatReader());
-  const lastSentRef = useRef("");
   const stopFnRef = useRef(null);
 
-  // beep ogni lettura
+  // Evita doppi: tieni memoria dei codici letti negli ultimi N secondi
+  const recentCodesRef = useRef(new Map()); // code -> timestamp(ms)
+  const COOLDOWN_MS = 6000; // ignora lo stesso codice per 4s
+  const GLOBAL_RATE_MS = 400; // min. distanza tra 2 letture qualsiasi
+
+  const lastAnyScanRef = useRef(0);
+
+  // beep
   const beep = () => {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       const ctx = new Ctx();
       const o = ctx.createOscillator();
       const g = ctx.createGain();
-      o.connect(g);
-      g.connect(ctx.destination);
-      o.type = "sine";
-      o.frequency.value = 880;
-      o.start();
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880; o.type = "sine";
+      o.start(); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
       setTimeout(() => o.stop(), 150);
     } catch {}
   };
 
-  // invio al foglio via Apps Script (no-cors: non aspettiamo risposta)
   const sendToSheet = async (isbn) => {
     try {
       await fetch(WEBHOOK_URL, {
         method: "POST",
         mode: "no-cors",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ box: boxName, isbn }),
+        body: JSON.stringify({ box: boxName, isbn })
       });
-    } catch {
-      // con no-cors è normale non vedere risposta
+    } catch {}
+  };
+
+  // pulizia periodica della cache dei codici
+  const sweepOld = (now) => {
+    for (const [code, t] of recentCodesRef.current.entries()) {
+      if (now - t > COOLDOWN_MS) recentCodesRef.current.delete(code);
     }
   };
 
@@ -78,47 +85,43 @@ function Scanner({ boxName, onDone }) {
     setRunning(true);
     try {
       stopFnRef.current = await reader.decodeFromVideoDevice(
-        undefined, // lascia scegliere la camera "best"
+        undefined,
         videoRef.current,
-        async (result, err) => {
+        async (result) => {
+          const now = Date.now();
           if (result) {
+            // rate limit globale
+            if (now - lastAnyScanRef.current < GLOBAL_RATE_MS) return;
+            lastAnyScanRef.current = now;
+
             const raw = (result.getText() || "").trim();
-            // evita doppie letture ravvicinate dello stesso codice
-            if (raw && raw !== lastSentRef.current) {
-              lastSentRef.current = raw;
-              setLast(raw);
-              setCount((c) => c + 1);
-              beep();
-              sendToSheet(raw);
-              // sblocca la possibilità di rileggere lo stesso codice dopo 1.5s
-              setTimeout(() => {
-                lastSentRef.current = "";
-              }, 1500);
-            }
+            if (!raw) return;
+
+            // dedup per codice
+            sweepOld(now);
+            if (recentCodesRef.current.has(raw)) return; // già letto di recente
+
+            recentCodesRef.current.set(raw, now);
+            setLast(raw);
+            setCount((c) => c + 1);
+            beep();
+            sendToSheet(raw);
           }
         }
       );
     } catch (e) {
-      alert(
-        "Impossibile avviare la fotocamera.\nConcedi i permessi al browser e riprova."
-      );
+      alert("Impossibile avviare la fotocamera. Concedi i permessi e riprova.");
       setRunning(false);
     }
   };
 
   const stop = () => {
-    try {
-      stopFnRef.current?.stop();
-    } catch {}
+    try { stopFnRef.current?.stop(); } catch {}
     reader.reset();
     setRunning(false);
   };
 
-  useEffect(() => {
-    // stop su smontaggio
-    return () => stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => () => stop(), []);
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", textAlign: "center" }}>
@@ -128,37 +131,26 @@ function Scanner({ boxName, onDone }) {
 
       <div style={{ marginBottom: 12 }}>
         {!running ? (
-          <Btn onClick={start} style={{ width: 300 }}>
-            Avvia scansione
-          </Btn>
+          <Btn onClick={start} style={{ width: 300 }}>Avvia scansione</Btn>
         ) : (
-          <Btn ghost onClick={stop} style={{ width: 300 }}>
-            Ferma scansione
-          </Btn>
+          <Btn ghost onClick={stop} style={{ width: 300 }}>Ferma scansione</Btn>
         )}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center" }}>
-        <video
-          ref={videoRef}
-          style={{
-            width: "100%",
-            maxWidth: 640,
-            borderRadius: 12,
-            border: "1px solid #ddd",
-            background: "#000",
-          }}
-          muted
-          playsInline
-        />
-      </div>
+      <video
+        ref={videoRef}
+        style={{
+          width: "100%", maxWidth: 640,
+          borderRadius: 12, border: "1px solid #ddd", background: "#000"
+        }}
+        muted playsInline
+      />
 
       <div style={{ marginTop: 12, color: "#555" }}>
-        <div>
-          Letti: <strong>{count}</strong>
-        </div>
-        <div>
-          Ultimo ISBN: <strong>{last || "—"}</strong>
+        <div>Letti: <strong>{count}</strong></div>
+        <div>Ultimo ISBN: <strong>{last || "—"}</strong></div>
+        <div style={{ fontSize: 12, marginTop: 6 }}>
+          Suggerimento: allontana il libro dopo il beep ✅
         </div>
       </div>
 
