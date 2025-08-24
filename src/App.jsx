@@ -1,39 +1,3 @@
-import React, { useEffect, useRef, useState } from "react";
-import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
-import { BrowserMultiFormatReader } from "@zxing/browser";
-
-/** ====== CONFIG ====== */
-// Endpoint (deployment "Web app" di Google Apps Script, quello che termina con /exec)
-const ENDPOINT =
-  "https://script.google.com/macros/s/AKfycbyKdL1AoXQm2Ybe3i6xojoq3ovU-WqpUximmnT7bdnCERlak4HqN-CqmmCCXBlfq2nWjA/exec";
-
-// Client ID OAuth (quello che mi hai dato)
-const GOOGLE_CLIENT_ID =
-  "913870968625-a9ocd6aj71q1mpraccgmq5r25vapnlgh.apps.googleusercontent.com";
-
-/** ====== UI helper ====== */
-function Btn({ children, ghost, onClick, style }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: ghost ? "#fff" : "#2563eb",
-        color: ghost ? "#111" : "#fff",
-        padding: "12px 16px",
-        borderRadius: 12,
-        border: ghost ? "1px solid #ddd" : "none",
-        boxShadow: ghost ? "none" : "0 2px 8px rgba(0,0,0,0.1)",
-        width: 260,
-        cursor: "pointer",
-        ...style,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** ====== SCANNER ====== */
 function Scanner({ boxName, onDone }) {
   const videoRef = useRef(null);
   const [running, setRunning] = useState(false);
@@ -42,11 +6,24 @@ function Scanner({ boxName, onDone }) {
   const [reader] = useState(() => new BrowserMultiFormatReader());
   const stopFnRef = useRef(null);
 
-  // anti-duplicato
-  const recentCodesRef = useRef(new Map()); // code -> timestamp
-  const COOLDOWN_MS = 6000;   // ignora lo stesso codice per 6s
-  const GLOBAL_RATE_MS = 500; // distanza minima tra due letture qualsiasi
+  // === dedup & rate limit ===
+  const DEDUP_WINDOW_MS = 8000;     // ignora lo stesso ISBN per 8s
+  const AFTER_SEND_LOCK_MS = 1200;  // blocco “hard” dopo ogni invio
+  const GLOBAL_RATE_MS = 500;       // distanza minima tra due letture qualsiasi
+
   const lastAnyScanRef = useRef(0);
+  const lastSentAtRef   = useRef(0);
+  const lastSentCodeRef = useRef("");            // ISBN normalizzato
+  const recentIsbnRef   = useRef(new Map());     // isbnNormalizzato -> lastTs
+
+  const norm = (raw) => String(raw || "").replace(/\D+/g, "");
+  const isIsbn = (d) => d.length === 10 || (d.length === 13 && (d.startsWith("978") || d.startsWith("979")));
+
+  const sweepOld = (now) => {
+    for (const [code, t] of recentIsbnRef.current.entries()) {
+      if (now - t > DEDUP_WINDOW_MS) recentIsbnRef.current.delete(code);
+    }
+  };
 
   const beep = () => {
     try {
@@ -62,31 +39,14 @@ function Scanner({ boxName, onDone }) {
     } catch {}
   };
 
-  // invia solo ISBN validi (10 o 13 con 978/979)
-  const sendToSheet = async (raw) => {
-    const digits = String(raw || "").replace(/\D+/g, "");
-    const isIsbn =
-      digits.length === 10 ||
-      (digits.length === 13 && (digits.startsWith("978") || digits.startsWith("979")));
-    if (!isIsbn) return;
-
+  const sendToSheet = async (isbnDigits) => {
     try {
       await fetch(ENDPOINT, {
         method: "POST",
-        // con Apps Script spesso mancano le CORS headers → usiamo no-cors
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ box: boxName, isbn: digits }),
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // niente preflight CORS
+        body: JSON.stringify({ box: boxName, isbn: isbnDigits }),
       });
-    } catch {
-      // è normale non avere risposta con no-cors
-    }
-  };
-
-  const sweepOld = (now) => {
-    for (const [code, t] of recentCodesRef.current.entries()) {
-      if (now - t > COOLDOWN_MS) recentCodesRef.current.delete(code);
-    }
+    } catch {}
   };
 
   const start = async () => {
@@ -97,29 +57,40 @@ function Scanner({ boxName, onDone }) {
         undefined,
         videoRef.current,
         async (result) => {
-          if (!result) return;
           const now = Date.now();
+          if (!result) return;
 
           // rate limit globale
           if (now - lastAnyScanRef.current < GLOBAL_RATE_MS) return;
           lastAnyScanRef.current = now;
 
+          // blocco duro post-invio
+          if (now - lastSentAtRef.current < AFTER_SEND_LOCK_MS) return;
+
           const raw = (result.getText() || "").trim();
-          if (!raw) return;
+          const digits = norm(raw);
+          if (!isIsbn(digits)) return; // scarta non-libro
 
-          // dedup per codice
+          // dedup per ISBN normalizzato
           sweepOld(now);
-          if (recentCodesRef.current.has(raw)) return;
+          if (recentIsbnRef.current.has(digits)) return;
 
-          recentCodesRef.current.set(raw, now);
-          setLast(raw);
+          // evita ripetizioni immediatamente consecutive dello stesso codice
+          if (digits === lastSentCodeRef.current) return;
+
+          // --- OK: valido e nuovo ---
+          recentIsbnRef.current.set(digits, now);
+          lastSentCodeRef.current = digits;
+          lastSentAtRef.current = now;
+
+          setLast(digits);
           setCount((c) => c + 1);
           beep();
-          sendToSheet(raw);
+          sendToSheet(digits);
         }
       );
     } catch (e) {
-      alert("Impossibile avviare la fotocamera. Concedi i permessi al browser e riprova.");
+      alert("Impossibile avviare la fotocamera. Concedi i permessi e riprova.");
       setRunning(false);
     }
   };
@@ -157,9 +128,9 @@ function Scanner({ boxName, onDone }) {
 
       <div style={{ marginTop: 12, color: "#555" }}>
         <div>Letti: <strong>{count}</strong></div>
-        <div>Ultimo codice letto: <strong>{last || "—"}</strong></div>
+        <div>Ultimo ISBN: <strong>{last || "—"}</strong></div>
         <div style={{ fontSize: 12, marginTop: 6 }}>
-          Suggerimento: allontana il libro dopo il beep ✅
+          Consiglio: allontana il libro dopo il beep ✅
         </div>
       </div>
 
@@ -167,109 +138,5 @@ function Scanner({ boxName, onDone }) {
         <Btn ghost onClick={onDone}>Torna alla Home</Btn>
       </div>
     </div>
-  );
-}
-
-/** ====== APP ROOT ====== */
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [boxName, setBoxName] = useState("");
-  const [step, setStep] = useState("home");
-  const [sheets, setSheets] = useState([]);
-
-  const handleLoginSuccess = (credentialResponse) => {
-    setUser({ token: credentialResponse.credential });
-  };
-
-  const handleStartScan = () => {
-    if (!boxName.trim()) {
-      alert("Inserisci il nome della scatola (es. Scatola1)");
-      return;
-    }
-    setStep("scanner");
-  };
-
-  return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <main style={{ minHeight: "100vh", background: "#fff", padding: 24 }}>
-        {step === "home" && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-              alignItems: "center",
-            }}
-          >
-            <h1 style={{ fontSize: 24, fontWeight: 700 }}>Catalogo Libri 📚</h1>
-            {!user ? (
-              <GoogleLogin
-                onSuccess={handleLoginSuccess}
-                onError={() => alert("Errore login Google")}
-              />
-            ) : (
-              <>
-                <Btn onClick={() => setStep("start")}>Inizia Scansione</Btn>
-                <Btn ghost onClick={() => setStep("liste")}>
-                  Visualizza Liste
-                </Btn>
-                <Btn ghost onClick={() => setStep("scatole")}>
-                  Scatole Create
-                </Btn>
-              </>
-            )}
-          </div>
-        )}
-
-        {step === "start" && (
-          <div style={{ maxWidth: 480, margin: "0 auto" }}>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>
-              Inserisci nome scatola
-            </h2>
-            <input
-              type="text"
-              value={boxName}
-              onChange={(e) => setBoxName(e.target.value)}
-              placeholder="Es. Scatola1"
-              style={{
-                width: "100%",
-                padding: 10,
-                border: "1px solid #ddd",
-                borderRadius: 8,
-                marginBottom: 12,
-              }}
-            />
-            <Btn onClick={handleStartScan}>Avvia Scansione</Btn>
-          </div>
-        )}
-
-        {step === "scanner" && (
-          <Scanner boxName={boxName} onDone={() => setStep("home")} />
-        )}
-
-        {step === "liste" && (
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>
-              Liste Registrate
-            </h2>
-            {/* TODO: collegare lettura dallo Sheet */}
-            <ul>{sheets.map((s, i) => <li key={i}>{s}</li>)}</ul>
-          </div>
-        )}
-
-        {step === "scatole" && (
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>
-              Scatole Create
-            </h2>
-            {/* TODO: collegare lettura dallo Sheet */}
-            <ul>
-              <li>Scatola1</li>
-              <li>Scatola2</li>
-            </ul>
-          </div>
-        )}
-      </main>
-    </GoogleOAuthProvider>
   );
 }
