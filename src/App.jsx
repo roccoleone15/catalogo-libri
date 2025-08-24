@@ -2,15 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
-// Webhook Apps Script che scrive sullo Sheet (finisce con /exec)
+// === CONFIG ===
 const WEBHOOK_URL =
   "https://script.google.com/macros/s/AKfycbxZviwyFCkbCOqtbuDYOdiGjuy3ak7WJiL3dqZfAvcltxl34BdQ2UG1t0LP9rV04tVh3g/exec";
 
-// ID client OAuth Google (quello che mi hai fornito)
 const GOOGLE_CLIENT_ID =
   "913870968625-a9ocd6aj71q1mpraccgmq5r25vapnlgh.apps.googleusercontent.com";
 
-// Button di stile semplice
+// === UI helper ===
 function Btn({ children, ghost, onClick, style }) {
   return (
     <button
@@ -32,7 +31,7 @@ function Btn({ children, ghost, onClick, style }) {
   );
 }
 
-// Componente Scanner con lettura continua
+// === SCANNER ===
 function Scanner({ boxName, onDone }) {
   const videoRef = useRef(null);
   const [running, setRunning] = useState(false);
@@ -41,14 +40,13 @@ function Scanner({ boxName, onDone }) {
   const [reader] = useState(() => new BrowserMultiFormatReader());
   const stopFnRef = useRef(null);
 
-  // Evita doppi: tieni memoria dei codici letti negli ultimi N secondi
-  const recentCodesRef = useRef(new Map()); // code -> timestamp(ms)
-  const COOLDOWN_MS = 6000; // ignora lo stesso codice per 4s
-  const GLOBAL_RATE_MS = 400; // min. distanza tra 2 letture qualsiasi
+  // de-dup solido
+  const recentCodesRef = useRef(new Map()); // code -> timestamp
+  const COOLDOWN_MS = 6000;    // ignora lo stesso codice per 6s
+  const GLOBAL_RATE_MS = 500;  // min distanza tra 2 letture qualsiasi
 
   const lastAnyScanRef = useRef(0);
 
-  // beep
   const beep = () => {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -56,24 +54,33 @@ function Scanner({ boxName, onDone }) {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.connect(g); g.connect(ctx.destination);
-      o.frequency.value = 880; o.type = "sine";
-      o.start(); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+      o.type = "sine"; o.frequency.value = 880;
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
       setTimeout(() => o.stop(), 150);
     } catch {}
   };
 
-  const sendToSheet = async (isbn) => {
+  // invio al backend: filtra solo ISBN validi (10 o 13 con 978/979)
+  const sendToSheet = async (raw) => {
+    const digits = String(raw || "").replace(/\D+/g, "");
+    const isIsbn =
+      digits.length === 10 ||
+      (digits.length === 13 && (digits.startsWith("978") || digits.startsWith("979")));
+    if (!isIsbn) return; // ignora codici non-libro
+
     try {
       await fetch(WEBHOOK_URL, {
         method: "POST",
         mode: "no-cors",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ box: boxName, isbn })
+        body: JSON.stringify({ box: boxName, isbn: digits }),
       });
-    } catch {}
+    } catch {
+      // con no-cors è normale non avere risposta
+    }
   };
 
-  // pulizia periodica della cache dei codici
   const sweepOld = (now) => {
     for (const [code, t] of recentCodesRef.current.entries()) {
       if (now - t > COOLDOWN_MS) recentCodesRef.current.delete(code);
@@ -88,25 +95,25 @@ function Scanner({ boxName, onDone }) {
         undefined,
         videoRef.current,
         async (result) => {
+          if (!result) return;
           const now = Date.now();
-          if (result) {
-            // rate limit globale
-            if (now - lastAnyScanRef.current < GLOBAL_RATE_MS) return;
-            lastAnyScanRef.current = now;
 
-            const raw = (result.getText() || "").trim();
-            if (!raw) return;
+          // rate limit globale
+          if (now - lastAnyScanRef.current < GLOBAL_RATE_MS) return;
+          lastAnyScanRef.current = now;
 
-            // dedup per codice
-            sweepOld(now);
-            if (recentCodesRef.current.has(raw)) return; // già letto di recente
+          const raw = (result.getText() || "").trim();
+          if (!raw) return;
 
-            recentCodesRef.current.set(raw, now);
-            setLast(raw);
-            setCount((c) => c + 1);
-            beep();
-            sendToSheet(raw);
-          }
+          // dedup per codice
+          sweepOld(now);
+          if (recentCodesRef.current.has(raw)) return;
+
+          recentCodesRef.current.set(raw, now);
+          setLast(raw);
+          setCount((c) => c + 1);
+          beep();
+          sendToSheet(raw);
         }
       );
     } catch (e) {
@@ -148,7 +155,7 @@ function Scanner({ boxName, onDone }) {
 
       <div style={{ marginTop: 12, color: "#555" }}>
         <div>Letti: <strong>{count}</strong></div>
-        <div>Ultimo ISBN: <strong>{last || "—"}</strong></div>
+        <div>Ultimo codice letto: <strong>{last || "—"}</strong></div>
         <div style={{ fontSize: 12, marginTop: 6 }}>
           Suggerimento: allontana il libro dopo il beep ✅
         </div>
@@ -161,11 +168,12 @@ function Scanner({ boxName, onDone }) {
   );
 }
 
+// === APP ROOT ===
 export default function App() {
   const [user, setUser] = useState(null);
   const [boxName, setBoxName] = useState("");
   const [step, setStep] = useState("home");
-  const [sheets, setSheets] = useState([]); // placeholder per viste future
+  const [sheets, setSheets] = useState([]);
 
   const handleLoginSuccess = (credentialResponse) => {
     setUser({ token: credentialResponse.credential });
@@ -173,7 +181,7 @@ export default function App() {
 
   const handleStartScan = () => {
     if (!boxName.trim()) {
-      alert("Inserisci il nome della scatola (solo caratteri/num. es. Scatola1)");
+      alert("Inserisci il nome della scatola (es. Scatola1)");
       return;
     }
     setStep("scanner");
