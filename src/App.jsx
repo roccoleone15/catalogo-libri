@@ -2,14 +2,16 @@ import React, { useEffect, useRef, useState } from "react";
 import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
-// === CONFIG ===
-const WEBHOOK_URL =
-  "https://script.google.com/macros/s/AKfycbxZviwyFCkbCOqtbuDYOdiGjuy3ak7WJiL3dqZfAvcltxl34BdQ2UG1t0LP9rV04tVh3g/exec";
+/** ====== CONFIG ====== */
+// Endpoint (deployment "Web app" di Google Apps Script, quello che termina con /exec)
+const ENDPOINT =
+  "https://script.google.com/macros/s/AKfycbyKdL1AoXQm2Ybe3i6xojoq3ovU-WqpUximmnT7bdnCERlak4HqN-CqmmCCXBlfq2nWjA/exec";
 
+// Client ID OAuth (quello che mi hai dato)
 const GOOGLE_CLIENT_ID =
   "913870968625-a9ocd6aj71q1mpraccgmq5r25vapnlgh.apps.googleusercontent.com";
 
-// === UI helper ===
+/** ====== UI helper ====== */
 function Btn({ children, ghost, onClick, style }) {
   return (
     <button
@@ -31,7 +33,7 @@ function Btn({ children, ghost, onClick, style }) {
   );
 }
 
-// === SCANNER ===
+/** ====== SCANNER ====== */
 function Scanner({ boxName, onDone }) {
   const videoRef = useRef(null);
   const [running, setRunning] = useState(false);
@@ -40,11 +42,10 @@ function Scanner({ boxName, onDone }) {
   const [reader] = useState(() => new BrowserMultiFormatReader());
   const stopFnRef = useRef(null);
 
-  // de-dup solido
+  // anti-duplicato
   const recentCodesRef = useRef(new Map()); // code -> timestamp
-  const COOLDOWN_MS = 6000;    // ignora lo stesso codice per 6s
-  const GLOBAL_RATE_MS = 500;  // min distanza tra 2 letture qualsiasi
-
+  const COOLDOWN_MS = 6000;   // ignora lo stesso codice per 6s
+  const GLOBAL_RATE_MS = 500; // distanza minima tra due letture qualsiasi
   const lastAnyScanRef = useRef(0);
 
   const beep = () => {
@@ -61,23 +62,24 @@ function Scanner({ boxName, onDone }) {
     } catch {}
   };
 
-  // invio al backend: filtra solo ISBN validi (10 o 13 con 978/979)
+  // invia solo ISBN validi (10 o 13 con 978/979)
   const sendToSheet = async (raw) => {
     const digits = String(raw || "").replace(/\D+/g, "");
     const isIsbn =
       digits.length === 10 ||
       (digits.length === 13 && (digits.startsWith("978") || digits.startsWith("979")));
-    if (!isIsbn) return; // ignora codici non-libro
+    if (!isIsbn) return;
 
     try {
-      await fetch(WEBHOOK_URL, {
+      await fetch(ENDPOINT, {
         method: "POST",
+        // con Apps Script spesso mancano le CORS headers → usiamo no-cors
         mode: "no-cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ box: boxName, isbn: digits }),
       });
     } catch {
-      // con no-cors è normale non avere risposta
+      // è normale non avere risposta con no-cors
     }
   };
 
@@ -117,7 +119,7 @@ function Scanner({ boxName, onDone }) {
         }
       );
     } catch (e) {
-      alert("Impossibile avviare la fotocamera. Concedi i permessi e riprova.");
+      alert("Impossibile avviare la fotocamera. Concedi i permessi al browser e riprova.");
       setRunning(false);
     }
   };
@@ -168,7 +170,7 @@ function Scanner({ boxName, onDone }) {
   );
 }
 
-// === APP ROOT ===
+/** ====== APP ROOT ====== */
 export default function App() {
   const [user, setUser] = useState(null);
   const [boxName, setBoxName] = useState("");
