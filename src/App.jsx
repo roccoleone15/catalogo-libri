@@ -1,14 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
 import { fetchBookMetadata } from "./bookApi.js";
-import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
+// Removed Google OAuth to simplify access and avoid origin errors
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
 /** ===== CONFIG ===== */
 // Removed Google Sheets; all writes go to Supabase
 
-const GOOGLE_CLIENT_ID =
-  "913870968625-a9ocd6aj71q1mpraccgmq5r25vapnlgh.apps.googleusercontent.com";
+// Google OAuth removed
 
 /** ===== UI Button ===== */
 function Btn({ children, ghost, onClick, style }) {
@@ -40,6 +39,7 @@ function Scanner({ boxName, onDone }) {
   const [last, setLast] = useState("");
   const [reader] = useState(() => new BrowserMultiFormatReader());
   const stopFnRef = useRef(null);
+  const [recentBooks, setRecentBooks] = useState([]);
 
   // dedup & rate limit
   const DEDUP_WINDOW_MS = 8000;
@@ -166,13 +166,43 @@ function Scanner({ boxName, onDone }) {
 
   useEffect(() => () => stop(), []);
 
+  // Load and subscribe to recent books for this box
+  useEffect(() => {
+    let subscription;
+    const loadRecent = async () => {
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .eq('box', boxName)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (!error) setRecentBooks(data || []);
+    };
+    if (boxName) {
+      loadRecent();
+      try {
+        subscription = supabase
+          .channel(`books-inserts-${boxName}`)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books' }, (payload) => {
+            if (payload?.new?.box === boxName) {
+              setRecentBooks((prev) => [payload.new, ...(prev || [])].slice(0, 10));
+            }
+          })
+          .subscribe();
+      } catch {}
+    }
+    return () => {
+      try { subscription && supabase.removeChannel(subscription); } catch {}
+    };
+  }, [boxName]);
+
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", textAlign: "center" }}>
+    <div style={{ maxWidth: 960, margin: "0 auto", textAlign: "center" }}>
       <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>
         Scansione attiva per: {boxName}
       </h2>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 12, display: 'flex', gap: 12, justifyContent: 'center' }}>
         {!running ? (
           <Btn onClick={start} style={{ width: 300 }}>
             Avvia scansione
@@ -182,20 +212,37 @@ function Scanner({ boxName, onDone }) {
             Ferma scansione
           </Btn>
         )}
+        <Btn ghost onClick={() => { stop(); onDone(); }} style={{ width: 300 }}>
+          Torna alla Home
+        </Btn>
       </div>
 
-      <video
-        ref={videoRef}
-        style={{
-          width: "100%",
-          maxWidth: 640,
-          borderRadius: 12,
-          border: "1px solid #ddd",
-          background: "#000",
-        }}
-        muted
-        playsInline
-      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+        <video
+          ref={videoRef}
+          style={{
+            width: "100%",
+            maxWidth: 640,
+            borderRadius: 12,
+            border: "1px solid #ddd",
+            background: "#000",
+          }}
+          muted
+          playsInline
+        />
+
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Ultime scansioni</div>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {(recentBooks || []).map((b, idx) => (
+              <li key={idx} style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}>
+                <div style={{ fontWeight: 600 }}>{b.title || 'Senza titolo'}</div>
+                <div style={{ color: '#666', fontSize: 12 }}>{b.isbn} • {(b.created_at || '').slice(0,10)}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
 
       <div style={{ marginTop: 12, color: "#555" }}>
         <div>
@@ -218,7 +265,7 @@ function Scanner({ boxName, onDone }) {
 
 /** ===== APP ROOT ===== */
 function App() {
-  const [user, setUser] = useState(null);
+  // Google OAuth removed
   const [boxName, setBoxName] = useState("");
   const [step, setStep] = useState("home");
   const [books, setBooks] = useState([]);
@@ -227,9 +274,7 @@ function App() {
   const [boxesList, setBoxesList] = useState([]);
   const [selectedBox, setSelectedBox] = useState("");
 
-  const handleLoginSuccess = (credentialResponse) => {
-    setUser({ token: credentialResponse.credential });
-  };
+  // Login removed
 
   const handleStartScan = () => {
     const target = (selectedBox || boxName || "").trim();
@@ -297,11 +342,7 @@ function App() {
             <div>
               <div className="flex items-center bg-white p-4 pb-2 justify-between">
                 <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center pl-12">Book Manager</h2>
-                <div className="flex w-12 items-center justify-end">
-                  {!user ? (
-                    <GoogleLogin onSuccess={handleLoginSuccess} onError={() => alert('Errore login Google')} />
-                  ) : null}
-                </div>
+                <div className="flex w-12 items-center justify-end" />
               </div>
               <div className="flex justify-center">
                 <div className="flex flex-1 gap-3 max-w-[480px] flex-col items-stretch px-4 py-3">
