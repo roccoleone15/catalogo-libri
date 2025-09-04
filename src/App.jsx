@@ -84,12 +84,10 @@ function Scanner({ boxName, onDone }) {
 
   const sendToSupabase = async (isbnDigits) => {
     try {
-      const timestamp = new Date().toISOString();
       const meta = await fetchBookMetadata(isbnDigits);
       const { error } = await supabase
         .from("books")
         .insert({
-          timestamp,
           box: boxName,
           isbn: isbnDigits,
           title: meta.title || "",
@@ -270,9 +268,18 @@ function App() {
                   <button
                     className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-5 bg-[#f0f2f5] text-[#111418] text-base font-bold leading-normal tracking-[0.015em] w-full"
                     onClick={async () => {
-                      const { data } = await supabase.from('books').select('*').order('timestamp', { ascending: false })
-                      setBooks(data || [])
-                      setStep('books')
+                      const { data, error } = await supabase
+                        .from('books')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+                      if (error) {
+                        // eslint-disable-next-line no-console
+                        console.error('Load books failed', error);
+                        alert('Impossibile caricare i libri. Verifica la tabella e le policy in Supabase.');
+                        return;
+                      }
+                      setBooks(data || []);
+                      setStep('books');
                     }}
                   >
                     <span className="truncate">Registered Lists</span>
@@ -299,9 +306,9 @@ function App() {
           <div className="relative flex min-h-screen flex-col bg-white justify-between overflow-x-hidden" style={{fontFamily: 'Manrope, "Noto Sans", sans-serif'}}>
             <div>
               <div className="flex items-center bg-white p-4 pb-2 justify-between">
-                <div className="text-[#111418] flex size-12 shrink-0 items-center" aria-hidden>
+                <button className="text-[#111418] flex size-12 shrink-0 items-center" onClick={() => setStep('home')} aria-label="Back">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"></path></svg>
-                </div>
+                </button>
                 <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center pr-12">Add Book</h2>
               </div>
               <div className="flex max-w-[480px] flex-wrap items-end gap-4 px-4 py-3">
@@ -316,6 +323,16 @@ function App() {
                       <option key={b} value={b}>{b}</option>
                     ))}
                   </select>
+                </label>
+              </div>
+              <div className="flex max-w-[480px] flex-wrap items-end gap-4 px-4 py-1">
+                <label className="flex flex-col min-w-40 flex-1">
+                  <input
+                    placeholder="Or type a new box name"
+                    className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#111418] focus:outline-0 focus:ring-0 border-none bg-[#f0f2f5] focus:border-none h-14 placeholder:text-[#60748a] p-4 text-base font-normal leading-normal"
+                    value={selectedBox}
+                    onChange={(e) => setSelectedBox(e.target.value)}
+                  />
                 </label>
               </div>
               <div className="flex px-4 py-3 justify-start">
@@ -365,14 +382,14 @@ function App() {
                     <h3 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] px-4 pb-2 pt-4">{box}</h3>
                     {groups[box]
                       .slice()
-                      .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))
+                      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
                       .map((item, idx) => (
                         <div key={idx} className="flex items-center gap-4 bg-white px-4 min-h-[72px] py-2 justify-between cursor-pointer" onClick={() => { setSelectedBook(item); setStep('detail'); }}>
                           <div className="flex flex-col justify-center">
                             <p className="text-[#111418] text-base font-medium leading-normal line-clamp-1">{item.title || 'Senza titolo'}</p>
                             <p className="text-[#60748a] text-sm font-normal leading-normal line-clamp-2">{item.box || '—'}</p>
                           </div>
-                          <div className="shrink-0"><p className="text-[#60748a] text-sm font-normal leading-normal">{(item.timestamp || '').slice(0,10) || '—'}</p></div>
+                          <div className="shrink-0"><p className="text-[#60748a] text-sm font-normal leading-normal">{(item.created_at || '').slice(0,10) || '—'}</p></div>
                         </div>
                       ))}
                   </div>
