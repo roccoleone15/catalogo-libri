@@ -87,9 +87,11 @@ function Scanner({ boxName, onDone }) {
       // Ensure box exists in `boxes` table (ignore if already exists)
       if (boxName) {
         try {
-          await supabase.from('boxes').insert({ name: boxName });
+          await supabase
+            .from('boxes')
+            .upsert({ name: boxName }, { onConflict: 'name', ignoreDuplicates: true });
         } catch (err) {
-          // ignore errors (e.g. unique violation)
+          // ignore unique violation and similar errors
         }
       }
       const meta = await fetchBookMetadata(isbnDigits);
@@ -103,8 +105,6 @@ function Scanner({ boxName, onDone }) {
           year: meta.year ? Number(meta.year) : null,
           genre: meta.genre || "",
           cover: meta.cover || null,
-          marketPrice: null,
-          priceSource: null,
           plot: meta.plot || "",
         });
       if (error) throw error;
@@ -128,7 +128,7 @@ function Scanner({ boxName, onDone }) {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("DB insert failed", e);
-      alert('Salvataggio su database fallito. Controlla le policy e le env keys.');
+      alert(`Salvataggio fallito: ${e?.message || e?.hint || 'Controlla policy e colonne'}`);
     }
   };
 
@@ -188,13 +188,28 @@ function Scanner({ boxName, onDone }) {
   useEffect(() => {
     let subscription;
     const loadRecent = async () => {
-      const { data, error } = await supabase
-        .from('books')
-        .select('*')
-        .eq('box', boxName)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (!error) setRecentBooks(data || []);
+      let data = null; let error = null;
+      try {
+        const res = await supabase
+          .from('books')
+          .select('*')
+          .eq('box', boxName)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        data = res.data; error = res.error;
+      } catch {}
+      if (error) {
+        // Retry ordering by id if created_at not present
+        const res2 = await supabase
+          .from('books')
+          .select('*')
+          .eq('box', boxName)
+          .order('id', { ascending: false })
+          .limit(10);
+        if (!res2.error) setRecentBooks(res2.data || []);
+      } else {
+        setRecentBooks(data || []);
+      }
     };
     if (boxName) {
       loadRecent();
