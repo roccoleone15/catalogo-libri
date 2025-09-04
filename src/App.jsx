@@ -108,9 +108,27 @@ function Scanner({ boxName, onDone }) {
           plot: meta.plot || "",
         });
       if (error) throw error;
+      // Optimistically update local recent list
+      setRecentBooks((prev) => [
+        {
+          box: boxName,
+          isbn: isbnDigits,
+          title: meta.title || "",
+          author: meta.author || "",
+          year: meta.year ? Number(meta.year) : null,
+          genre: meta.genre || "",
+          cover: meta.cover || null,
+          marketPrice: null,
+          priceSource: null,
+          plot: meta.plot || "",
+          created_at: new Date().toISOString(),
+        },
+        ...(prev || []),
+      ].slice(0, 10));
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("DB insert failed", e);
+      alert('Salvataggio su database fallito. Controlla le policy e le env keys.');
     }
   };
 
@@ -217,7 +235,7 @@ function Scanner({ boxName, onDone }) {
         </Btn>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
         <video
           ref={videoRef}
           style={{
@@ -230,18 +248,18 @@ function Scanner({ boxName, onDone }) {
           muted
           playsInline
         />
+      </div>
 
-        <div style={{ textAlign: 'left' }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Ultime scansioni</div>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {(recentBooks || []).map((b, idx) => (
-              <li key={idx} style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}>
-                <div style={{ fontWeight: 600 }}>{b.title || 'Senza titolo'}</div>
-                <div style={{ color: '#666', fontSize: 12 }}>{b.isbn} • {(b.created_at || '').slice(0,10)}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
+      <div style={{ marginTop: 16, textAlign: 'left', maxWidth: 640, marginLeft: 'auto', marginRight: 'auto' }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Ultime scansioni</div>
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          {(recentBooks || []).map((b, idx) => (
+            <li key={idx} style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}>
+              <div style={{ fontWeight: 600 }}>{b.title || 'Senza titolo'}</div>
+              <div style={{ color: '#666', fontSize: 12 }}>{b.isbn} • {(b.created_at || '').slice(0,10)}</div>
+            </li>
+          ))}
+        </ul>
       </div>
 
       <div style={{ marginTop: 12, color: "#555" }}>
@@ -256,9 +274,7 @@ function Scanner({ boxName, onDone }) {
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <Btn ghost onClick={onDone}>Torna alla Home</Btn>
-      </div>
+      {/* Removed duplicate bottom Home button */}
     </div>
   );
 }
