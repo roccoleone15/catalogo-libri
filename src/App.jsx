@@ -84,6 +84,14 @@ function Scanner({ boxName, onDone }) {
 
   const sendToSupabase = async (isbnDigits) => {
     try {
+      // Ensure box exists in `boxes` table (ignore if already exists)
+      if (boxName) {
+        try {
+          await supabase.from('boxes').insert({ name: boxName });
+        } catch (err) {
+          // ignore errors (e.g. unique violation)
+        }
+      }
       const meta = await fetchBookMetadata(isbnDigits);
       const { error } = await supabase
         .from("books")
@@ -216,6 +224,7 @@ function App() {
   const [books, setBooks] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
   const [boxesOptions, setBoxesOptions] = useState([]);
+  const [boxesList, setBoxesList] = useState([]);
   const [selectedBox, setSelectedBox] = useState("");
 
   const handleLoginSuccess = (credentialResponse) => {
@@ -234,13 +243,50 @@ function App() {
 
   useEffect(() => {
     const loadBoxes = async () => {
-      const { data } = await supabase.from('books').select('box').order('box');
-      const names = Array.from(new Set((data || []).map(b => b.box))).filter(Boolean);
+      const { data, error } = await supabase.from('boxes').select('name').order('name');
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('Load boxes failed', error);
+        setBoxesOptions([]);
+        setBoxesList([]);
+        return;
+      }
+      const names = (data || []).map(b => b.name).filter(Boolean);
       setBoxesOptions(names);
+      setBoxesList(names);
     };
-    if (step === 'start') {
+    if (step === 'start' || step === 'boxes') {
       loadBoxes();
     }
+  }, [step]);
+
+  // Live auto-refresh: when on Registered Lists, fetch and subscribe to inserts
+  useEffect(() => {
+    if (step !== 'books') return;
+    let subscription;
+    const load = async () => {
+      const { data } = await supabase
+        .from('books')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setBooks(data || []);
+    };
+    load();
+    try {
+      subscription = supabase
+        .channel('books-inserts')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'books' },
+          (payload) => {
+            setBooks((prev) => [payload.new, ...(prev || [])]);
+          }
+        )
+        .subscribe();
+    } catch {}
+    return () => {
+      try { subscription && supabase.removeChannel(subscription); } catch {}
+    };
   }, [step]);
 
   return (
@@ -401,16 +447,47 @@ function App() {
         )}
 
         {step === 'boxes' && (
-          <div style={{ maxWidth: 640, margin: '0 auto' }}>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>Scatole</h2>
-            <ul>
-              {(books || []).map((b, idx) => (
-                <li key={idx} style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}>{b.box}</li>
-              ))}
-            </ul>
-            <div style={{ marginTop: 16 }}>
-              <Btn ghost onClick={() => setStep('home')}>Torna alla Home</Btn>
+          <div className="relative flex min-h-screen flex-col bg-white justify-between overflow-x-hidden" style={{fontFamily: 'Manrope, "Noto Sans", sans-serif'}}>
+            <div>
+              <div className="flex items-center bg-white p-4 pb-2 justify-between">
+                <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center pl-12">Boxes</h2>
+              </div>
+              <div className="px-4 py-2">
+                <div className="flex gap-2">
+                  <input
+                    className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#111418] focus:outline-0 focus:ring-0 border-none bg-[#f0f2f5] focus:border-none h-12 placeholder:text-[#60748a] p-3 text-base font-normal leading-normal"
+                    placeholder="New box name"
+                    value={selectedBox}
+                    onChange={(e) => setSelectedBox(e.target.value)}
+                  />
+                  <button
+                    className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-4 bg-[#0d78f2] text-white text-base font-bold leading-normal tracking-[0.015em]"
+                    onClick={async () => {
+                      const name = (selectedBox || '').trim();
+                      if (!name) return;
+                      const { error } = await supabase.from('boxes').insert({ name });
+                      if (error && error.code !== '23505') {
+                        // eslint-disable-next-line no-console
+                        console.error('Create box failed', error);
+                        alert('Impossibile creare la scatola');
+                        return;
+                      }
+                      setSelectedBox('');
+                      const { data } = await supabase.from('boxes').select('name').order('name');
+                      setBoxesList((data || []).map(b => b.name));
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <ul className="px-4">
+                {(boxesList || []).map((name, idx) => (
+                  <li key={idx} className="py-2 border-b border-[#eee]">{name}</li>
+                ))}
+              </ul>
             </div>
+            <div><div className="h-5 bg-white"></div></div>
           </div>
         )}
 
