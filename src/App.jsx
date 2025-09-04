@@ -335,7 +335,7 @@ function App() {
   }, [step]);
 
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+    <>
       <main style={{ minHeight: "100vh", background: "#fff", padding: 24 }}>
         {step === "home" && (
           <div className="relative flex min-h-screen flex-col bg-white justify-between overflow-x-hidden" style={{fontFamily: 'Manrope, "Noto Sans", sans-serif'}}>
@@ -572,7 +572,7 @@ function App() {
           </div>
         )}
       </main>
-    </GoogleOAuthProvider>
+    </>
   );
 }
 
