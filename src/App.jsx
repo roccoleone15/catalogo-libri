@@ -404,17 +404,11 @@ function App() {
           <div className="relative flex min-h-screen flex-col bg-white justify-between overflow-x-hidden" style={{fontFamily: 'Manrope, "Noto Sans", sans-serif'}}>
             <div>
               <div className="flex items-center bg-white p-4 pb-2 justify-between">
-                <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center pl-12">My Books</h2>
-                <div className="flex w-12 items-center justify-end">
-                  <button
-                    className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 bg-transparent text-[#111418] gap-2 text-base font-bold leading-normal tracking-[0.015em] min-w-0 p-0"
-                    onClick={() => setStep('start')}
-                  >
-                    <div className="text-[#111418]" aria-hidden>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"></path></svg>
-                    </div>
-                  </button>
-                </div>
+                <button className="text-[#111418] flex size-12 shrink-0 items-center" onClick={() => setStep('home')} aria-label="Back">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"></path></svg>
+                </button>
+                <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center">My Books</h2>
+                <div className="w-12" />
               </div>
               {(() => {
                 const groups = (books || []).reduce((acc, b) => {
@@ -450,7 +444,11 @@ function App() {
           <div className="relative flex min-h-screen flex-col bg-white justify-between overflow-x-hidden" style={{fontFamily: 'Manrope, "Noto Sans", sans-serif'}}>
             <div>
               <div className="flex items-center bg-white p-4 pb-2 justify-between">
-                <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center pl-12">Boxes</h2>
+                <button className="text-[#111418] flex size-12 shrink-0 items-center" onClick={() => setStep('home')} aria-label="Back">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"></path></svg>
+                </button>
+                <h2 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center">Boxes</h2>
+                <div className="w-12" />
               </div>
               <div className="px-4 py-2">
                 <div className="flex gap-2">
