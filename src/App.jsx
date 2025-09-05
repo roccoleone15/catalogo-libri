@@ -315,6 +315,7 @@ function App() {
   const [selectedBox, setSelectedBox] = useState("");
   const [qrBoxName, setQrBoxName] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const [expandedBoxes, setExpandedBoxes] = useState(new Set());
 
   // Login removed
 
@@ -352,7 +353,7 @@ function App() {
   const generateQrForBox = async (name) => {
     try {
       const base = window.location.origin;
-      const url = `${base}?box=${encodeURIComponent(name)}`;
+      const url = `${base}?box=${encodeURIComponent(name)}&view=books`;
       const dataUrl = await QRCode.toDataURL(url, { width: 256, margin: 1 });
       setQrBoxName(name);
       setQrDataUrl(dataUrl);
@@ -362,6 +363,19 @@ function App() {
       alert('Impossibile generare il QR code');
     }
   };
+
+  // Auto-select box from URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const boxParam = params.get('box');
+    const viewParam = params.get('view');
+    if (boxParam) {
+      setSelectedBox(boxParam);
+      if (viewParam === 'books') {
+        setStep('books');
+      }
+    }
+  }, []);
 
   // Live auto-refresh: when on Registered Lists, fetch and subscribe to inserts
   useEffect(() => {
@@ -519,22 +533,61 @@ function App() {
                 const order = Object.keys(groups).sort((a, b) => a.localeCompare(b));
                 return order.map((box) => (
                   <div key={box}>
-                    <h3 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em] px-4 pb-2 pt-4">{box}</h3>
-                    {groups[box]
-                      .slice()
-                      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
-                      .map((item, idx) => (
-                        <div key={idx} className="flex items-center gap-4 bg-white px-4 min-h-[72px] py-2 justify-between cursor-pointer" onClick={() => { setSelectedBook(item); setStep('detail'); }}>
-                          <div className="flex flex-col justify-center">
-                            <p className="text-[#111418] text-base font-medium leading-normal line-clamp-1">{item.title || 'Senza titolo'}</p>
-                            <p className="text-[#60748a] text-sm font-normal leading-normal line-clamp-2">{(item.boxes && item.boxes.name) || '—'}</p>
-                          </div>
-                          <div className="shrink-0"><p className="text-[#60748a] text-sm font-normal leading-normal">{(item.created_at || '').slice(0,10) || '—'}</p></div>
-                        </div>
-                      ))}
+                    <div 
+                      className="flex items-center justify-between px-4 py-3 cursor-pointer border-b border-[#eee]"
+                      onClick={() => {
+                        const newExpanded = new Set(expandedBoxes);
+                        if (newExpanded.has(box)) {
+                          newExpanded.delete(box);
+                        } else {
+                          newExpanded.add(box);
+                        }
+                        setExpandedBoxes(newExpanded);
+                      }}
+                    >
+                      <h3 className="text-[#111418] text-lg font-bold leading-tight tracking-[-0.015em]">{box}</h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[#60748a] text-sm">({groups[box].length} libri)</span>
+                        <button
+                          className="text-[#60748a] text-sm px-2 py-1 rounded"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            generateQrForBox(box);
+                          }}
+                        >
+                          QR
+                        </button>
+                        <span className="text-[#60748a] text-lg">
+                          {expandedBoxes.has(box) ? '▼' : '▶'}
+                        </span>
+                      </div>
+                    </div>
+                    {expandedBoxes.has(box) && (
+                      <div>
+                        {groups[box]
+                          .slice()
+                          .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+                          .map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-4 bg-white px-4 min-h-[72px] py-2 justify-between cursor-pointer border-b border-[#f0f0f0]" onClick={() => { setSelectedBook(item); setStep('detail'); }}>
+                              <div className="flex flex-col justify-center">
+                                <p className="text-[#111418] text-base font-medium leading-normal line-clamp-1">{item.title || 'Senza titolo'}</p>
+                                <p className="text-[#60748a] text-sm font-normal leading-normal line-clamp-2">{item.author || '—'}</p>
+                              </div>
+                              <div className="shrink-0"><p className="text-[#60748a] text-sm font-normal leading-normal">{(item.created_at || '').slice(0,10) || '—'}</p></div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 ));
               })()}
+              {qrDataUrl && (
+                <div className="px-4 py-4 border-t border-[#eee]">
+                  <div className="text-sm text-[#60748a] mb-2">QR Code per: {qrBoxName}</div>
+                  <img src={qrDataUrl} alt={`QR ${qrBoxName}`} style={{ width: 200, height: 200 }} />
+                  <div className="text-xs text-[#60748a] mt-2">Scansiona per aprire il catalogo di questa scatola</div>
+                </div>
+              )}
             </div>
             <div><div className="h-5 bg-white"></div></div>
           </div>
