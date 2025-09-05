@@ -84,21 +84,31 @@ function Scanner({ boxName, onDone }) {
 
   const sendToSupabase = async (isbnDigits) => {
     try {
-      // Ensure box exists in `boxes` table (ignore if already exists)
+      // Ensure box exists and get its id
+      let boxId = null;
       if (boxName) {
-        try {
-          await supabase
+        const { data: found, error: findErr } = await supabase
+          .from('boxes')
+          .select('id')
+          .eq('name', boxName)
+          .maybeSingle();
+        if (!findErr && found) {
+          boxId = found.id;
+        } else {
+          const { data: up, error: upErr } = await supabase
             .from('boxes')
-            .upsert({ name: boxName }, { onConflict: 'name', ignoreDuplicates: true });
-        } catch (err) {
-          // ignore unique violation and similar errors
+            .upsert({ name: boxName }, { onConflict: 'name' })
+            .select('id')
+            .single();
+          if (upErr) throw upErr;
+          boxId = up.id;
         }
       }
       const meta = await fetchBookMetadata(isbnDigits);
       const { error } = await supabase
         .from("books")
         .insert({
-          box: boxName,
+          box_id: boxId,
           isbn: isbnDigits,
           title: meta.title || "",
           author: meta.author || "",
@@ -111,7 +121,7 @@ function Scanner({ boxName, onDone }) {
       // Optimistically update local recent list
       setRecentBooks((prev) => [
         {
-          box: boxName,
+          boxes: { name: boxName },
           isbn: isbnDigits,
           title: meta.title || "",
           author: meta.author || "",
@@ -188,28 +198,13 @@ function Scanner({ boxName, onDone }) {
   useEffect(() => {
     let subscription;
     const loadRecent = async () => {
-      let data = null; let error = null;
-      try {
-        const res = await supabase
-          .from('books')
-          .select('*')
-          .eq('box', boxName)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        data = res.data; error = res.error;
-      } catch {}
-      if (error) {
-        // Retry ordering by id if created_at not present
-        const res2 = await supabase
-          .from('books')
-          .select('*')
-          .eq('box', boxName)
-          .order('id', { ascending: false })
-          .limit(10);
-        if (!res2.error) setRecentBooks(res2.data || []);
-      } else {
-        setRecentBooks(data || []);
-      }
+      const res = await supabase
+        .from('books')
+        .select('id, created_at, isbn, title, boxes(name)')
+        .eq('boxes.name', boxName)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (!res.error) setRecentBooks(res.data || []);
     };
     if (boxName) {
       loadRecent();
@@ -217,7 +212,7 @@ function Scanner({ boxName, onDone }) {
         subscription = supabase
           .channel(`books-inserts-${boxName}`)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books' }, (payload) => {
-            if (payload?.new?.box === boxName) {
+            if (payload?.new) {
               setRecentBooks((prev) => [payload.new, ...(prev || [])].slice(0, 10));
             }
           })
@@ -388,7 +383,7 @@ function App() {
                     onClick={async () => {
                       const { data, error } = await supabase
                         .from('books')
-                        .select('*')
+                        .select('*, boxes(name)')
                         .order('created_at', { ascending: false });
                       if (error) {
                         // eslint-disable-next-line no-console
@@ -484,7 +479,7 @@ function App() {
               </div>
               {(() => {
                 const groups = (books || []).reduce((acc, b) => {
-                  const k = b.box || '—';
+                  const k = (b.boxes && b.boxes.name) || '—';
                   (acc[k] = acc[k] || []).push(b);
                   return acc;
                 }, {});
@@ -499,7 +494,7 @@ function App() {
                         <div key={idx} className="flex items-center gap-4 bg-white px-4 min-h-[72px] py-2 justify-between cursor-pointer" onClick={() => { setSelectedBook(item); setStep('detail'); }}>
                           <div className="flex flex-col justify-center">
                             <p className="text-[#111418] text-base font-medium leading-normal line-clamp-1">{item.title || 'Senza titolo'}</p>
-                            <p className="text-[#60748a] text-sm font-normal leading-normal line-clamp-2">{item.box || '—'}</p>
+                            <p className="text-[#60748a] text-sm font-normal leading-normal line-clamp-2">{(item.boxes && item.boxes.name) || '—'}</p>
                           </div>
                           <div className="shrink-0"><p className="text-[#60748a] text-sm font-normal leading-normal">{(item.created_at || '').slice(0,10) || '—'}</p></div>
                         </div>
