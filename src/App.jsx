@@ -186,9 +186,15 @@ function Scanner({ boxName, onDone }) {
 
   const stop = () => {
     try {
-      stopFnRef.current?.stop();
+      if (stopFnRef.current && typeof stopFnRef.current.stop === 'function') {
+        stopFnRef.current.stop();
+      }
     } catch {}
-    reader.reset();
+    try {
+      if (reader && typeof reader.reset === 'function') {
+        reader.reset();
+      }
+    } catch {}
     setRunning(false);
   };
 
@@ -198,13 +204,20 @@ function Scanner({ boxName, onDone }) {
   useEffect(() => {
     let subscription;
     const loadRecent = async () => {
-      const res = await supabase
-        .from('books')
-        .select('id, created_at, isbn, title, boxes(name)')
-        .eq('boxes.name', boxName)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (!res.error) setRecentBooks(res.data || []);
+      try {
+        const res = await supabase
+          .from('books')
+          .select('id, created_at, isbn, title, boxes(name)')
+          .eq('boxes.name', boxName)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        if (res.error) throw res.error;
+        setRecentBooks(res.data || []);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Impossibile caricare le ultime scansioni', err);
+        alert('Impossibile caricare le ultime scansioni');
+      }
     };
     if (boxName) {
       loadRecent();
@@ -314,17 +327,19 @@ function App() {
 
   useEffect(() => {
     const loadBoxes = async () => {
-      const { data, error } = await supabase.from('boxes').select('name').order('name');
-      if (error) {
+      try {
+        const { data, error } = await supabase.from('boxes').select('name').order('name');
+        if (error) throw error;
+        const names = (data || []).map(b => b.name).filter(Boolean);
+        setBoxesOptions(names);
+        setBoxesList(names);
+      } catch (err) {
         // eslint-disable-next-line no-console
-        console.error('Load boxes failed', error);
+        console.error('Load boxes failed', err);
+        alert('Impossibile caricare le scatole');
         setBoxesOptions([]);
         setBoxesList([]);
-        return;
       }
-      const names = (data || []).map(b => b.name).filter(Boolean);
-      setBoxesOptions(names);
-      setBoxesList(names);
     };
     if (step === 'start' || step === 'boxes') {
       loadBoxes();
@@ -381,18 +396,19 @@ function App() {
                   <button
                     className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-5 bg-[#f0f2f5] text-[#111418] text-base font-bold leading-normal tracking-[0.015em] w-full"
                     onClick={async () => {
-                      const { data, error } = await supabase
-                        .from('books')
-                        .select('*, boxes(name)')
-                        .order('created_at', { ascending: false });
-                      if (error) {
+                      try {
+                        const { data, error } = await supabase
+                          .from('books')
+                          .select('*, boxes(name)')
+                          .order('created_at', { ascending: false });
+                        if (error) throw error;
+                        setBooks(data || []);
+                        setStep('books');
+                      } catch (err) {
                         // eslint-disable-next-line no-console
-                        console.error('Load books failed', error);
+                        console.error('Load books failed', err);
                         alert('Impossibile caricare i libri. Verifica la tabella e le policy in Supabase.');
-                        return;
                       }
-                      setBooks(data || []);
-                      setStep('books');
                     }}
                   >
                     <span className="truncate">Registered Lists</span>
@@ -528,18 +544,23 @@ function App() {
                   <button
                     className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-4 bg-[#0d78f2] text-white text-base font-bold leading-normal tracking-[0.015em]"
                     onClick={async () => {
-                      const name = (selectedBox || '').trim();
-                      if (!name) return;
-                      const { error } = await supabase.from('boxes').insert({ name });
-                      if (error && error.code !== '23505') {
+                      try {
+                        const name = (selectedBox || '').trim();
+                        if (!name) return;
+                        const { error } = await supabase
+                          .from('boxes')
+                          .upsert({ name }, { onConflict: 'name' });
+                        if (error) throw error;
+                        setSelectedBox('');
+                        const { data: refresh, error: refErr } = await supabase.from('boxes').select('name').order('name');
+                        if (refErr) throw refErr;
+                        setBoxesList((refresh || []).map(b => b.name));
+                        alert('Scatola creata/aggiornata');
+                      } catch (err) {
                         // eslint-disable-next-line no-console
-                        console.error('Create box failed', error);
+                        console.error('Create box failed', err);
                         alert('Impossibile creare la scatola');
-                        return;
                       }
-                      setSelectedBox('');
-                      const { data } = await supabase.from('boxes').select('name').order('name');
-                      setBoxesList((data || []).map(b => b.name));
                     }}
                   >
                     Add
