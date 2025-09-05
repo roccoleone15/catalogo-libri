@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
 import { fetchBookMetadata } from "./bookApi.js";
+import QRCode from "qrcode";
 // Removed Google OAuth to simplify access and avoid origin errors
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
@@ -312,6 +313,8 @@ function App() {
   const [boxesOptions, setBoxesOptions] = useState([]);
   const [boxesList, setBoxesList] = useState([]);
   const [selectedBox, setSelectedBox] = useState("");
+  const [qrBoxName, setQrBoxName] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
 
   // Login removed
 
@@ -345,6 +348,20 @@ function App() {
       loadBoxes();
     }
   }, [step]);
+
+  const generateQrForBox = async (name) => {
+    try {
+      const base = window.location.origin;
+      const url = `${base}?box=${encodeURIComponent(name)}`;
+      const dataUrl = await QRCode.toDataURL(url, { width: 256, margin: 1 });
+      setQrBoxName(name);
+      setQrDataUrl(dataUrl);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('QR generation failed', err);
+      alert('Impossibile generare il QR code');
+    }
+  };
 
   // Live auto-refresh: when on Registered Lists, fetch and subscribe to inserts
   useEffect(() => {
@@ -569,9 +586,23 @@ function App() {
               </div>
               <ul className="px-4">
                 {(boxesList || []).map((name, idx) => (
-                  <li key={idx} className="py-2 border-b border-[#eee]">{name}</li>
+                  <li key={idx} className="py-2 border-b border-[#eee] flex items-center justify-between gap-2">
+                    <span>{name}</span>
+                    <button
+                      className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-3 bg-[#f0f2f5] text-[#111418] text-sm font-bold leading-normal tracking-[0.015em]"
+                      onClick={() => generateQrForBox(name)}
+                    >
+                      QR Code
+                    </button>
+                  </li>
                 ))}
               </ul>
+              {qrDataUrl && (
+                <div className="px-4 py-4">
+                  <div className="text-sm text-[#60748a] mb-2">QR per: {qrBoxName}</div>
+                  <img src={qrDataUrl} alt={`QR ${qrBoxName}`} style={{ width: 256, height: 256 }} />
+                </div>
+              )}
             </div>
             <div><div className="h-5 bg-white"></div></div>
           </div>
